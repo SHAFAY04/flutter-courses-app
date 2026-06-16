@@ -3,16 +3,20 @@
 A complete multi-screen Flutter application built for the **Mobile App Development** assignment.  
 It demonstrates user authentication, form validation, REST API CRUD, offline-first caching, and clean architecture.
 
+github url: https://github.com/SHAFAY04/myapp/
+
 ---
 
 ## Student Information
 
 | Field | Value |
 |-------|-------|
-| **Student Name** | *(Replace with your name)* |
-| **Student ID** | *(Replace with your ID)* |
+| **Student Name** | *Muhammad Shafay* |
+| **Student ID** | *SE221098* |
 | **Course** | Mobile App Development |
 | **Framework** | Flutter / Dart |
+| **API** | JSONPlaceholder (`https://jsonplaceholder.typicode.com`) |
+| **API Docs** | https://jsonplaceholder.typicode.com/guide |
 
 ---
 
@@ -139,16 +143,23 @@ lib/
 └── widgets/
 ```
 
----
-
-## Getting Started
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| Fetch all courses | `GET` | `/posts?_limit=20` |
+| Fetch single course | `GET` | `/posts/:id` |
+| Create course | `POST` | `/posts` |
+| Update course | `PUT` | `/posts/:id` |
+| Delete course | `DELETE` | `/posts/:id` |
 
 ### Prerequisites
 
 - Flutter SDK ≥ 3.0.0
 - Dart ≥ 3.0.0
 
-### Installation
+### Architecture
+- **`CourseApiService`** — pure Dart HTTP layer, zero Flutter imports. Handles all network calls, JSON encoding/decoding, and error throwing.
+- **`CourseController`** — ChangeNotifier controller that calls the service, manages `ApiState` (loading / success / error), and exposes the course list to the UI.
+- **`CoursesScreen` / `CourseFormScreen`** — UI only reads state and calls controller methods. No HTTP logic anywhere in the UI layer.
 
 ```bash
 git clone <your-repo-url>
@@ -163,7 +174,7 @@ flutter run
 
 | Splash | Registration | Login |
 |--------|-------------|-------|
-| ![Splash](screenshots/splash.png) | ![Registration](screenshots/registration.png) | ![Login](screenshots/login.png) |
+| ![Splash](screenshots/splash.png) | ![Registration](screenshots/register.png) | ![Login](screenshots/login.png) |
 
 | Dashboard | Detail | API Courses |
 |-----------|--------|-------------|
