@@ -27,6 +27,12 @@ class CourseModel {
         'body': body,
       };
 
+  /// Full map including [id] for Hive / JSON persistence.
+  Map<String, dynamic> toStorageMap() => {
+        'id': id,
+        ...toMap(),
+      };
+
   CourseModel copyWith({
     int? id,
     int? userId,

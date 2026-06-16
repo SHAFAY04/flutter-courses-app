@@ -1,7 +1,7 @@
 # EduAuth — Flutter Multi-Screen Authentication App
 
 A complete multi-screen Flutter application built for the **Mobile App Development** assignment.  
-It demonstrates user authentication, form validation, clean architecture, and navigation.
+It demonstrates user authentication, form validation, REST API CRUD, offline-first caching, and clean architecture.
 
 ---
 
@@ -16,155 +16,173 @@ It demonstrates user authentication, form validation, clean architecture, and na
 
 ---
 
-## Project Structure
+## Tools & Packages Used
 
-```
-lib/
-├── main.dart                          # App entry, routing, theme
-├── core/
-│   ├── constants/
-│   │   └── app_constants.dart         # Colors, routes, subject data
-│   ├── enums/
-│   │   ├── gender_enum.dart           # Gender enum with display names
-│   │   └── auth_state_enum.dart       # AuthState enum
-│   └── validators/
-│       └── app_validator.dart         # Reusable validator class
-├── models/
-│   ├── user_model.dart                # User data model + serialisation
-│   └── subject_model.dart            # Subject data model
-├── controllers/
-│   └── auth_controller.dart          # Business logic (ChangeNotifier)
-├── widgets/
-│   ├── custom_text_field.dart        # Reusable text field component
-│   └── custom_button.dart            # Reusable button component
-└── screens/
-    ├── registration/
-    │   └── registration_screen.dart
-    ├── login/
-    │   └── login_screen.dart
-    ├── dashboard/
-    │   └── dashboard_screen.dart
-    └── detail/
-        └── detail_screen.dart
-```
-
----
-
-## Features
-
-### Authentication Flow
-- **Registration** → **Login** → **Dashboard** → **Detail**
-- Session persistence via `shared_preferences` with *Remember Me* toggle
-- Automatic session restoration on app launch
-
-### Registration Screen
-- First name, last name, email, gender (dropdown), password, confirm password
-- Real-time password rule checklist (6+ chars, uppercase, special character)
-- Submit button disabled until all fields are valid
-- Success dialog navigating to Login on completion
-
-### Login Screen
-- Email + password with full validation
-- Show/hide password toggle (eye icon)
-- Remember Me checkbox persists session across restarts
-- Error feedback via SnackBar
-
-### Dashboard Screen
-- User avatar (initials), full name, email displayed in hero app bar
-- Credit count stats chip
-- Tappable subject cards (Mobile App Development, Software Re-engineering, MIS)
-- Logout with confirmation dialog
-
-### Detail Screen
-- Subject name, code, emoji icon in gradient hero header
-- Course overview description
-- Schedule, room, instructor, credit hours displayed in info rows
-- Learning outcomes section
+| Package | Purpose |
+|---------|---------|
+| `provider` | State management (`ChangeNotifier` + `Consumer`) |
+| `shared_preferences` | Auth session persistence |
+| `http` | REST API calls to JSONPlaceholder |
+| `hive` / `hive_flutter` | Local NoSQL cache for course data |
+| `connectivity_plus` | Detect online/offline to route repository logic |
+| `path_provider` | Hive storage paths (transitive dependency) |
 
 ---
 
 ## Architecture
 
-| Concern | Implementation |
-|---------|---------------|
-| Business logic | `AuthController` (ChangeNotifier) |
-| State management | Provider (`ChangeNotifierProvider`) |
-| Validation | `AppValidator` static class |
-| Categorical values | `Gender` and `AuthState` enums |
-| Persistence | `shared_preferences` |
-| UI components | `CustomTextField`, `CustomButton` |
+```
+UI (Screens)
+    ↓
+State Management (CourseController / AuthController via Provider)
+    ↓
+Repository (CourseRepository)
+    ↓                           ↓
+API Service (CourseApiService)   Local Database (CourseLocalStorage / Hive)
+```
+
+| Layer | File(s) | Responsibility |
+|-------|---------|----------------|
+| **UI** | `screens/courses/*`, `screens/dashboard/*` | Render widgets, handle user input |
+| **State** | `controllers/course_controller.dart` | Loading / success / error / empty states, optimistic UI |
+| **Repository** | `repositories/course_repository.dart` | Decide API vs cache, sync data |
+| **API** | `services/course_api_service.dart` | HTTP only — no business logic |
+| **Local DB** | `data/local/course_local_storage.dart` | Persist courses in Hive |
+| **Connectivity** | `core/services/connectivity_service.dart` | Network status checks |
+
+---
+
+## Offline & State Management Approach
+
+### When the API is called
+
+The JSONPlaceholder API is **only** called when you open **API Courses** (or refresh that screen). Login and registration do not fetch courses.
+
+| Action | What happens |
+|--------|----------------|
+| Open API Courses (online) | HTTP GET → save to Hive → show live data |
+| Pull-to-refresh / refresh button | Same as above |
+| Open API Courses (offline, cache exists) | Load from Hive only — no API call |
+| Open API Courses (offline, no cache) | Error: no cached data yet |
+| API fails but cache exists | Show last saved Hive data |
+
+### Offline-first flow
+
+1. **Online fetch:** Call JSONPlaceholder → save result to Hive → show live data.
+2. **Offline fetch:** Load courses from Hive cache → show offline banner.
+3. **API failure with cache:** Fall back to last saved Hive data instead of an empty error screen.
+4. **Mutations:** Create/update/delete write to Hive immediately; remote calls run when online.
+
+### What persists after closing the app
+
+| Data | Persists? | Notes |
+|------|-----------|-------|
+| Hive course cache | Yes | Saved on disk; survives app restarts until app data is cleared |
+| In-memory UI state (`CourseController`) | No | Reset when the app process is killed |
+| Auth session (`shared_preferences`) | Yes | Remember Me / restored login |
+
+`connectivity_plus` checks whether a network interface is available, not whether the internet is fully reachable. If Wi‑Fi is still connected but the internet is down, the app may still attempt the API first; on failure it falls back to Hive when cached data exists.
+
+### State management
+
+- `CourseController` exposes `ApiState` (`initial`, `loading`, `success`, `error`, `empty`).
+- UI uses `Consumer<CourseController>` — no direct API or Hive access from widgets.
+- Flags `isOffline` and `isFromCache` drive the status banner on the courses screen.
+
+### Optimistic updates
+
+- **Update:** UI updates instantly; if the remote PUT fails while online, the previous course is restored and Hive is rolled back.
+- **Delete:** Item is removed instantly; if the remote DELETE fails while online, the item is re-inserted and Hive is restored.
+
+### UX enhancements
+
+- Pull-to-refresh on the course list
+- Search/filter by title, description, or ID
+- Dedicated empty-state UI
+- Linear progress indicator during background refresh
+- Offline / cache status banner
+
+---
+
+## Project Structure
+
+```
+lib/
+├── main.dart
+├── core/
+│   ├── constants/app_constants.dart
+│   ├── enums/
+│   │   ├── api_state_enum.dart
+│   │   ├── auth_state_enum.dart
+│   │   └── gender_enum.dart
+│   ├── services/connectivity_service.dart
+│   └── validators/app_validator.dart
+├── controllers/
+│   ├── auth_controller.dart
+│   └── course_controller.dart
+├── data/
+│   └── local/course_local_storage.dart
+├── models/
+│   ├── course_model.dart
+│   ├── subject_model.dart
+│   └── user_model.dart
+├── repositories/
+│   └── course_repository.dart
+├── services/
+│   └── course_api_service.dart
+├── screens/
+│   ├── courses/
+│   ├── dashboard/
+│   ├── detail/
+│   ├── login/
+│   └── registration/
+└── widgets/
+```
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
+
 - Flutter SDK ≥ 3.0.0
 - Dart ≥ 3.0.0
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
 git clone <your-repo-url>
-cd flutter_auth_app
-
-# 2. Install dependencies
+cd myapp
 flutter pub get
-
-# 3. Run the app
 flutter run
 ```
 
-### Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `provider` | ^6.1.2 | State management |
-| `shared_preferences` | ^2.3.2 | Local session persistence |
-
 ---
 
-## Screens
-
-> *(Replace the placeholder text below with actual screenshots after running the app)*
+## Screenshots
 
 | Splash | Registration | Login |
 |--------|-------------|-------|
 | ![Splash](screenshots/splash.png) | ![Registration](screenshots/registration.png) | ![Login](screenshots/login.png) |
 
-| Dashboard | Detail |
-|-----------|--------|
-| ![Dashboard](screenshots/dashboard.png) | ![Detail](screenshots/detail.png) |
+| Dashboard | Detail | API Courses |
+|-----------|--------|-------------|
+| ![Dashboard](screenshots/home.png) | ![Detail](screenshots/detail.png) | ![API Courses](screenshots/apicourses.png) |
 
 ---
 
-## Validator Class Reference
+## Features
 
-```dart
-AppValidator.validateEmail(value)           // Email format check
-AppValidator.validatePassword(value)        // 6+ chars, uppercase, special char
-AppValidator.validateConfirmPassword(v, pw) // Match check
-AppValidator.validateName(value, fieldName) // Non-empty, 2+ chars, letters only
-AppValidator.validateNotEmpty(value, name)  // Generic required-field check
-AppValidator.getPasswordRules(value)        // Returns List<PasswordRule> for live checklist
-```
+### Authentication Flow
+- Registration → Login → Dashboard → Detail
+- Session persistence via `shared_preferences`
+- Automatic session restoration on launch
 
----
-
-## Enum Reference
-
-```dart
-// Gender
-Gender.male | .female | .other | .preferNotToSay
-gender.displayName  // → "Male", "Female", etc.
-Gender.fromString("Male")  // → Gender.male
-
-// AuthState
-AuthState.initial | .loading | .authenticated | .unauthenticated | .registrationSuccess | .error
-authState.isLoading        // bool convenience getter
-authState.isAuthenticated  // bool convenience getter
-```
+### API Courses (CRUD + Offline)
+- List, create, edit, and delete courses via JSONPlaceholder
+- Hive cache for offline access
+- Optimistic update/delete with rollback on failure
+- Search and pull-to-refresh
 
 ---
 

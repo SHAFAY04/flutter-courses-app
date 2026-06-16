@@ -1,22 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
 import 'controllers/auth_controller.dart';
 import 'controllers/course_controller.dart';
 import 'core/constants/app_constants.dart';
+import 'data/local/course_local_storage.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/detail/detail_screen.dart';
 import 'screens/login/login_screen.dart';
 import 'screens/registration/registration_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Lock orientation to portrait
+
+  await Hive.initFlutter();
+  await CourseLocalStorage.instance.init();
+
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
   runApp(
     MultiProvider(
       providers: [
@@ -97,7 +103,6 @@ class _SplashRouterState extends State<_SplashRouter> {
   }
 
   Future<void> _init() async {
-    // Small delay so the splash frame renders
     await Future.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
 

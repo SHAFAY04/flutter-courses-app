@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../controllers/course_controller.dart';
 import '../../core/constants/app_constants.dart';
-import '../../core/enums/api_state_enum.dart';
 import '../../models/course_model.dart';
 import 'course_form_screen.dart';
 
@@ -15,13 +14,21 @@ class CoursesScreen extends StatefulWidget {
 }
 
 class _CoursesScreenState extends State<CoursesScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
-    // Fetch on first build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<CourseController>().fetchCourses();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _confirmDelete(CourseModel course) async {
@@ -60,7 +67,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
       final success = await controller.deleteCourse(course.id);
       if (mounted) {
         _showSnack(
-          success ? 'Course deleted successfully.' : controller.errorMessage!,
+          success
+              ? 'Course deleted.'
+              : controller.errorMessage ?? 'Delete failed.',
           isError: !success,
         );
       }
@@ -114,84 +123,89 @@ class _CoursesScreenState extends State<CoursesScreen> {
       ),
       body: Consumer<CourseController>(
         builder: (_, controller, __) {
-          // ── Loading ──────────────────────────────────────────────────────
-          if (controller.listState.isLoading) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+          if (controller.listState.isLoading && controller.courses.isEmpty) {
+            return const _LoadingView(
+              message: 'Loading courses…',
+            );
+          }
+
+          if (controller.listState.isError && controller.courses.isEmpty) {
+            return _ErrorView(
+              message: controller.errorMessage ?? 'Failed to load courses.',
+              onRetry: controller.fetchCourses,
+            );
+          }
+
+          if (controller.listState.isEmpty) {
+            return RefreshIndicator(
+              color: AppConstants.primaryColor,
+              onRefresh: controller.fetchCourses,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 children: [
-                  CircularProgressIndicator(color: AppConstants.primaryColor),
-                  SizedBox(height: 16),
-                  Text('Fetching courses from API…',
-                      style:
-                          TextStyle(color: Color(0xFF64748B), fontSize: 14)),
+                  _StatusBanner(controller: controller),
+                  const SizedBox(height: 48),
+                  _EmptyStateView(onAdd: () => _openForm()),
                 ],
               ),
             );
           }
 
-          // ── Error ────────────────────────────────────────────────────────
-          if (controller.listState.isError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.wifi_off_rounded,
-                        size: 64, color: Color(0xFFCBD5E1)),
-                    const SizedBox(height: 16),
-                    Text(
-                      controller.errorMessage ?? 'Failed to load courses.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Color(0xFF64748B), fontSize: 14),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: () => controller.fetchCourses(),
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Try Again'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppConstants.primaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
+          final visibleCourses =
+              controller.filteredCourses(_searchQuery);
 
-          // ── Empty ────────────────────────────────────────────────────────
-          if (controller.courses.isEmpty) {
-            return const Center(
-              child: Text('No courses found.',
-                  style: TextStyle(color: Color(0xFF64748B))),
-            );
-          }
-
-          // ── List ─────────────────────────────────────────────────────────
           return Column(
             children: [
-              _ApiInfoBanner(),
+              _StatusBanner(controller: controller),
+              _SearchBar(
+                controller: _searchController,
+                onChanged: (value) => setState(() => _searchQuery = value),
+                onClear: () {
+                  _searchController.clear();
+                  setState(() => _searchQuery = '');
+                },
+              ),
+              if (controller.listState.isLoading)
+                const LinearProgressIndicator(
+                  minHeight: 2,
+                  color: AppConstants.primaryColor,
+                  backgroundColor: Color(0xFFE2E8F0),
+                ),
               Expanded(
                 child: RefreshIndicator(
                   color: AppConstants.primaryColor,
                   onRefresh: controller.fetchCourses,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-                    itemCount: controller.courses.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) => _CourseCard(
-                      course: controller.courses[index],
-                      onEdit: () =>
-                          _openForm(course: controller.courses[index]),
-                      onDelete: () => _confirmDelete(controller.courses[index]),
-                    ),
-                  ),
+                  child: visibleCourses.isEmpty
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: const [
+                            SizedBox(height: 80),
+                            Icon(Icons.search_off_rounded,
+                                size: 56, color: Color(0xFFCBD5E1)),
+                            SizedBox(height: 12),
+                            Text(
+                              'No courses match your search.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Color(0xFF64748B), fontSize: 14),
+                            ),
+                          ],
+                        )
+                      : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding:
+                              const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                          itemCount: visibleCourses.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (_, index) => _CourseCard(
+                            course: visibleCourses[index],
+                            onEdit: () =>
+                                _openForm(course: visibleCourses[index]),
+                            onDelete: () =>
+                                _confirmDelete(visibleCourses[index]),
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -204,28 +218,230 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
 // ─── Sub-widgets ─────────────────────────────────────────────────────────────
 
-class _ApiInfoBanner extends StatelessWidget {
+class _LoadingView extends StatelessWidget {
+  final String message;
+
+  const _LoadingView({required this.message});
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: AppConstants.primaryColor.withOpacity(0.08),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.cloud_done_rounded,
-              size: 16, color: AppConstants.primaryColor),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Data from JSONPlaceholder API  ·  jsonplaceholder.typicode.com',
-              style: TextStyle(
-                  fontSize: 11,
-                  color: AppConstants.primaryColor,
-                  fontWeight: FontWeight.w500),
+          const CircularProgressIndicator(color: AppConstants.primaryColor),
+          const SizedBox(height: 16),
+          Text(message,
+              style: const TextStyle(color: Color(0xFF64748B), fontSize: 14)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _ErrorView({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.wifi_off_rounded,
+                size: 64, color: Color(0xFFCBD5E1)),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style:
+                  const TextStyle(color: Color(0xFF64748B), fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try Again'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppConstants.primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyStateView extends StatelessWidget {
+  final VoidCallback onAdd;
+
+  const _EmptyStateView({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        children: [
+          const Icon(Icons.inbox_rounded, size: 72, color: Color(0xFFCBD5E1)),
+          const SizedBox(height: 16),
+          const Text(
+            'No courses yet',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF334155),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Pull down to refresh or tap below to add your first course.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
+          ),
+          const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add Course'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppConstants.primaryColor,
+              side: const BorderSide(color: AppConstants.primaryColor),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _StatusBanner extends StatelessWidget {
+  final CourseController controller;
+
+  const _StatusBanner({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOffline = controller.isOffline;
+    final isCached = controller.isFromCache;
+
+    if (!isOffline && !isCached) {
+      return Container(
+        width: double.infinity,
+        color: AppConstants.primaryColor.withOpacity(0.08),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: const Row(
+          children: [
+            Icon(Icons.cloud_done_rounded,
+                size: 16, color: AppConstants.primaryColor),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Live data from JSONPlaceholder · synced to local cache',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppConstants.primaryColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      color: isOffline
+          ? const Color(0xFFFEF3C7)
+          : AppConstants.accentColor.withOpacity(0.12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            isOffline ? Icons.wifi_off_rounded : Icons.offline_pin_rounded,
+            size: 16,
+            color: isOffline ? const Color(0xFFB45309) : AppConstants.accentColor,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              isOffline
+                  ? 'Offline mode — showing cached courses from Hive'
+                  : 'Network unavailable — showing last saved cache',
+              style: TextStyle(
+                fontSize: 11,
+                color: isOffline
+                    ? const Color(0xFFB45309)
+                    : AppConstants.accentColor,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _SearchBar({
+    required this.controller,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          hintText: 'Search by title, description, or ID…',
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+          prefixIcon: const Icon(Icons.search_rounded,
+              color: AppConstants.primaryColor, size: 20),
+          suffixIcon: controller.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: onClear,
+                )
+              : null,
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(
+                color: AppConstants.primaryColor, width: 1.5),
+          ),
+        ),
       ),
     );
   }
@@ -259,7 +475,6 @@ class _CourseCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ───────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
@@ -290,14 +505,12 @@ class _CourseCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                // Edit
                 _ActionIcon(
                   icon: Icons.edit_rounded,
                   tooltip: 'Edit',
                   onTap: onEdit,
                 ),
                 const SizedBox(width: 6),
-                // Delete
                 _ActionIcon(
                   icon: Icons.delete_rounded,
                   tooltip: 'Delete',
@@ -307,7 +520,6 @@ class _CourseCard extends StatelessWidget {
               ],
             ),
           ),
-          // ── Body ─────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
